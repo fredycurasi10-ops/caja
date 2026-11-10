@@ -1,11 +1,11 @@
 {
- "name": "Caja Fotocopias",
- "short_name": "Caja",
+ "name": "Kaja",
+ "short_name": "Kaja",
  "start_url": "./",
  "scope": "./",
  "display": "standalone",
- "background_color": "#0E161C",
- "theme_color": "#0B7FA6",
+ "background_color": "#0C0440",
+ "theme_color": "#0C0440",
  "icons": [
   {
    "src": "icon-192.png",
