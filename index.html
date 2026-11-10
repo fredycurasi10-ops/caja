@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Caja Fotocopias</title>
 <meta name="theme-color" content="#0B7FA6">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -851,6 +854,7 @@ $("#tabs").addEventListener("click", e => {
   if (st.view === "aj") renderAj(); else render();
 });
 $("#cDate").value = today();
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 render();
 
 // ---------- conexión (Firebase) ----------
