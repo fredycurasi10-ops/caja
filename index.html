@@ -90,6 +90,8 @@ label.fl{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:6
 .chips button{border:1px solid var(--line);background:var(--bg);border-radius:7px;padding:5px 0;font-size:13px;font-weight:600}
 .filters{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
 .filters button{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:6px 12px;font-size:13px;font-weight:600;white-space:nowrap}
+.filters.sub button{padding:4px 10px;font-size:12px}
+.filters.sub:empty{display:none}
 .filters button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
 .tile{position:relative;text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:10px 10px 9px;min-height:84px;display:flex;flex-direction:column;justify-content:space-between;gap:6px;transition:transform .08s}
@@ -184,9 +186,10 @@ svg.chart text{fill:var(--muted);font-family:var(--mono);font-size:10px}
     </div>
   </div>
   <div class="spread">
-    <div class="filters" id="filters"></div>
+    <div style="display:flex;flex-direction:column;gap:6px;min-width:0"><div class="filters" id="filters"></div><div class="filters sub" id="subfilters"></div></div>
     <div class="small muted">Hoy: <b class="num" id="todayTot">S/ 0.00</b></div>
   </div>
+  <input id="q" class="f" type="search" placeholder="🔍 Buscar producto (ej. goma, lapicero, sello)…" autocomplete="off" aria-label="Buscar producto">
   <div class="tiles" id="tiles"></div>
   <p class="small muted">Escribe la cantidad (por ejemplo 25 copias) y luego toca el servicio. La cantidad vuelve a 1 después de cada venta.</p>
 </section>
@@ -307,7 +310,7 @@ const st = {
   db: null, user: null, uid: null, canWrite: true, dl: null,
   prods: {}, ventas: {}, compras: [], gastos: [], inv: [], movs: [], cierres: {},
   mine: {}, dirty: new Set(), writing: new Set(),
-  ticket: [], hist: [], cat: "Servicios", qty: 1,
+  ticket: [], hist: [], cat: "⭐ Frecuentes", sub: "", qty: 1,
   loaded: new Set(), view: "vender",
   rep: {p: "w", anchor: today()}, inv: "all", aj: "prod",
 };
@@ -444,7 +447,7 @@ function confirmBox(msg, ok) {
 }
 
 // ---------- render: vender ----------
-const CATS = ["Servicios", "Sellos", "Útiles", "Papel", "Todo"];
+const CATS = ["⭐ Frecuentes", "Servicios", "Sellos", "Útiles", "Papel", "Todo"];
 function prodList() { return Object.entries(st.prods).map(([code, p]) => ({code, ...p})).filter(p => p.activo !== false).sort((a, b) => (a.orden || 999) - (b.orden || 999) || String(a.nombre).localeCompare(b.nombre)); }
 function inCat(p, cat) {
   if (cat === "Todo") return p.tipo !== "insumo";
@@ -453,25 +456,58 @@ function inCat(p, cat) {
   if (cat === "Papel") return p.tipo === "venta" && p.cat === "Papel";
   return p.tipo === "venta" && p.cat !== "Papel" && p.cat !== "Sellos";
 }
+const normTxt = s => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+// Popularidad: en cuántos de los últimos 30 días se vendió (y cuánto), para ordenar lo más vendido primero
+function popularidad() {
+  const desde = addDays(today(), -30); const pop = {};
+  for (const d of dayDocs(f => f >= desde)) for (const k in (d.items || {})) {
+    const x = pop[k] || (pop[k] = {dias: 0, q: 0}); x.dias++; x.q += d.items[k].q || 0;
+  }
+  return pop;
+}
+// Grupo automático = primera palabra del nombre (Lapicero, Goma, Cinta, Borrador…)
+const grupoDe = p => { const w = String(p.nombre || "").trim().split(/\s+/)[0] || ""; return w.charAt(0).toUpperCase() + normTxt(w).slice(1); };
 function renderVender() {
   $("#filters").innerHTML = CATS.map(c => `<button type="button" class="${c === st.cat ? "on" : ""}" data-c="${c}">${c}</button>`).join("");
   const td = agg(f => f === today());
   $("#todayTot").textContent = S(td.m);
-  const list = prodList().filter(p => inCat(p, st.cat));
+  const q = normTxt($("#q").value.trim());
+  const pop = popularidad();
+  const score = p => (pop[p.code]?.dias || 0) * 100000 + (pop[p.code]?.q || 0);
+  let list, subHtml = "";
+  if (q) list = prodList().filter(p => p.tipo !== "insumo" && q.split(/\s+/).every(w => normTxt(p.nombre).includes(w)));
+  else if (st.cat === "⭐ Frecuentes") list = prodList().filter(p => p.tipo !== "insumo" && pop[p.code]).sort((a, b) => score(b) - score(a)).slice(0, 18);
+  else {
+    list = prodList().filter(p => inCat(p, st.cat));
+    if (list.length > 12 && st.cat !== "Servicios") {
+      const grupos = {}; list.forEach(p => { const g = grupoDe(p); grupos[g] = (grupos[g] || 0) + 1; });
+      const nombres = Object.keys(grupos).filter(g => grupos[g] > 1).sort();
+      if (nombres.length > 1) {
+        if (st.sub && !grupos[st.sub]) st.sub = "";
+        subHtml = `<button type="button" class="${!st.sub ? "on" : ""}" data-s="">Todos</button>` + nombres.map(g => `<button type="button" class="${g === st.sub ? "on" : ""}" data-s="${esc(g)}">${esc(g)} (${grupos[g]})</button>`).join("");
+        if (st.sub) list = list.filter(p => grupoDe(p) === st.sub);
+      }
+    }
+    list.sort((a, b) => score(b) - score(a) || (a.orden || 999) - (b.orden || 999) || String(a.nombre).localeCompare(b.nombre));
+  }
+  $("#subfilters").innerHTML = subHtml;
   let html = list.map(p => {
-    const q = td.items[p.code]?.q || 0;
+    const qq = td.items[p.code]?.q || 0;
     const low = p.tipo === "venta" && stockOf(p.code) <= (+p.stockMin || 0);
     return `<button type="button" class="tile ${p.cat === "Sellos" ? "sello" : p.tipo === "servicio" ? "svc" : ""} ${low ? "low" : ""}" data-code="${esc(p.code)}">
-      ${q ? `<span class="b num">${q}</span>` : ""}
+      ${qq ? `<span class="b num">${qq}</span>` : ""}
       <span class="n">${esc(p.nombre)}</span><span class="p num">${S(p.precio)}</span></button>`;
   }).join("");
-  if (st.cat === "Servicios" || st.cat === "Todo") html += `<button type="button" class="tile" data-code="${OTRO}"><span class="n">Otro (monto libre)</span><span class="p">Escribe el monto</span></button>`;
-  $("#tiles").innerHTML = html || `<div class="empty">${st.loaded.has("productos") ? "No hay productos en esta categoría. Agrégalos en Ajustes." : "Cargando productos…"}</div>`;
+  if (!q && (st.cat === "Servicios" || st.cat === "Todo" || st.cat === "⭐ Frecuentes")) html += `<button type="button" class="tile" data-code="${OTRO}"><span class="n">Otro (monto libre)</span><span class="p">Escribe el monto</span></button>`;
+  const vacio = st.cat === "⭐ Frecuentes" && !q ? "Aquí aparecerá lo que más vendes en los últimos 30 días. Mientras tanto, busca o elige una categoría." : (st.loaded.has("productos") ? "No se encontró nada. Prueba otra palabra o agrégalo en Ajustes." : "Cargando productos…");
+  $("#tiles").innerHTML = (html && list.length) || (html && st.cat !== "⭐ Frecuentes") ? html : `<div class="empty">${vacio}</div>` + html;
   const tot = st.ticket.reduce((a, e) => a + e.m, 0);
   $("#tkAmt").textContent = S(tot);
   $("#tkLines").textContent = st.ticket.length ? st.ticket.map(e => e.q + "× " + e.name).join(" · ") : "Toca un producto o servicio";
 }
-$("#filters").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; st.cat = b.dataset.c; renderVender(); });
+$("#subfilters").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; st.sub = b.dataset.s; renderVender(); });
+$("#filters").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; st.cat = b.dataset.c; st.sub = ""; $("#q").value = ""; renderVender(); });
+$("#q").addEventListener("input", () => renderVender());
 $("#tiles").addEventListener("click", e => {
   const b = e.target.closest(".tile"); if (!b) return;
   const code = b.dataset.code;
@@ -486,6 +522,7 @@ $("#tiles").addEventListener("click", e => {
   const q = Math.max(1, Math.floor(+$("#qty").value || 1));
   if (addSale(code, q)) {
     $("#qty").value = 1;
+    if ($("#q").value) $("#q").value = "";
     renderVender();
     const nb = $(`.tile[data-code="${CSS.escape(code)}"]`); nb && nb.classList.add("flash");
   }
